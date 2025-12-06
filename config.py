@@ -3,7 +3,7 @@ import sys
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-ROI_SIZE = (64, 128, 128)
+ROI_SIZE = (8, 128, 128)  # (Depth, Height, Width) - Z-depth reduced for variable-depth stacks
 SAMPLES_PER_VOLUME = 4
 NUM_WORKERS = 4
 BATCH_SIZE = 2

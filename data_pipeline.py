@@ -14,22 +14,31 @@ from monai.transforms import (
 import config
 
 def get_train_transforms():
-    """Defines the MONAI transformation pipeline for training."""
+    """
+    Defines the MONAI transformation pipeline for training.
+    
+    Handles variable-depth 3D volumes by extracting fixed-size crops.
+    RandSpatialCropSamplesd automatically handles volumes with different Z-depths
+    by cropping random sub-volumes of the specified ROI_SIZE.
+    """
     return Compose([
         LoadImaged(keys=["qpi", "dapi"]),
         EnsureChannelFirstd(keys=["qpi", "dapi"]),
         ScaleIntensityRanged(
             keys=["qpi", "dapi"],
-            a_min=0, a_max=65535,  
+            a_min=0, a_max=65535,  # Assumes 16-bit input range (0-65535)
             b_min=-1.0, b_max=1.0,
             clip=True,
         ),
+        # CRITICAL: Extract fixed-size 3D chunks from variable-depth stacks.
+        # If a stack has Z-depth=10 and roi_size Z=8, it picks a random start point.
+        # This enables training on volumes with different Z-depths.
         RandSpatialCropSamplesd(
             keys=["qpi", "dapi"],
-            roi_size=config.ROI_SIZE,
+            roi_size=config.ROI_SIZE,  # (Depth, Height, Width) = (8, 128, 128)
             num_samples=config.SAMPLES_PER_VOLUME,
             random_center=True,
-            random_size=False,
+            random_size=False,  # Fixed size crops
         ),
         EnsureTyped(keys=["qpi", "dapi"], dtype=torch.float32),
         ToTensord(keys=["qpi", "dapi"]),
@@ -61,10 +70,16 @@ def get_dataloader(data_dir, for_vae=False):
     """
     Creates a MONAI DataLoader.
     Assumes data_dir contains two subfolders: 'qpi' and 'dapi'
-    with matching filenames, e.g., volume_001.tif
+    with matching filenames (e.g., stack_*.tif or volume_*.tif).
+    
+    Supports variable-depth 3D volumes created by build_3d_dataset.py.
+    The volumes are automatically cropped to fixed-size patches during training.
     """
-    qpi_files = sorted(glob.glob(os.path.join(data_dir, "qpi", "*.tif")))
-    dapi_files = sorted(glob.glob(os.path.join(data_dir, "dapi", "*.tif")))
+    # Support both .tif and .nii.gz files
+    qpi_files = sorted(glob.glob(os.path.join(data_dir, "qpi", "*.tif")) + 
+                       glob.glob(os.path.join(data_dir, "qpi", "*.nii.gz")))
+    dapi_files = sorted(glob.glob(os.path.join(data_dir, "dapi", "*.tif")) + 
+                        glob.glob(os.path.join(data_dir, "dapi", "*.nii.gz")))
 
     if not dapi_files:
         raise ValueError(f"No DAPI files found in {data_dir}/dapi")
