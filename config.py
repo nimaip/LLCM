@@ -3,32 +3,35 @@ import sys
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-ROI_SIZE = (8, 128, 128)  # (Depth, Height, Width) - Z-depth reduced for variable-depth stacks
-SAMPLES_PER_VOLUME = 4
-NUM_WORKERS = 4
-BATCH_SIZE = 2
+# Data Configuration
+ROI_SIZE = (32, 128, 128)  # (Depth, Height, Width) - Must be divisible by 16 for VAE
+SAMPLES_PER_VOLUME = 4     # Number of random crops per volume
+NUM_WORKERS = 0            # Set to 0 for Windows compatibility (use 4+ on Linux with GPU)
+BATCH_SIZE = 2             # Increase to 4-8 if GPU memory allows
 
-
+# VAE Configuration
 VAE_MODEL_PATH = "vae.pth"
-VAE_CHANNELS = (16, 32, 64, 128) 
-VAE_STRIDES = (2, 2, 2, 2)     
-LATENT_CHANNELS = 8            
-VAE_EPOCHS = 100              
-VAE_LR = 1e-4
+VAE_CHANNELS = (16, 32, 64, 128)
+VAE_STRIDES = (2, 2, 2, 2)
+LATENT_CHANNELS = 8
+VAE_EPOCHS = 50            # Production: 50-100 epochs for good compression
+VAE_LR = 1e-4              # Learning rate
 
-L1_WEIGHT = 1.0
-KL_WEIGHT = 1e-6
-PERCEPTUAL_WEIGHT = 0.1     
+# VAE Loss Weights
+L1_WEIGHT = 1.0            # Reconstruction loss
+KL_WEIGHT = 1e-6           # KL divergence (latent regularization)
+PERCEPTUAL_WEIGHT = 0.1    # LPIPS perceptual loss
 
+# LLCM Configuration
 QPI_ENCODER_PATH = "qpi_encoder.pth"
 LLCM_EMA_PATH = "llcm_ema.pth"
-LLCM_EPOCHS = 200             
-LLCM_LR = 1e-4
-QPI_CONTEXT_DIM = 256
+LLCM_EPOCHS = 100          # Production: 100-200 epochs for consistency learning
+LLCM_LR = 1e-4             # Learning rate
+QPI_CONTEXT_DIM = 256      # QPI encoder output dimension
 LLCM_UNET_CHANNELS = (32, 64, 128, 256)
 LLCM_UNET_STRIDES = (2, 2, 2, 2)
-NUM_TRAIN_TIMESTEPS = 1000
-EMA_DECAY = 0.999
+NUM_TRAIN_TIMESTEPS = 1000 # Diffusion timesteps
+EMA_DECAY = 0.999          # Teacher model EMA decay
 
 INFERENCE_TIMESTEP = 0  # LCM uses timestep 0 for 1-step inference
 

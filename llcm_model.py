@@ -42,15 +42,19 @@ def get_llcm_unet():
     Initializes the 3D U-Net for the LLCM.
     This U-Net operates in the VAE's latent space.
     """
+    # MONAI UNet doesn't support cross_attention_dim directly
+    # We'll concatenate the context to the input instead
+    # So in_channels = LATENT_CHANNELS + 1 (for context channel)
+    # With ROI_SIZE=(32,128,128) and VAE downsample=16, latent shape is (2, 8, 8)
+    # Use 2 levels of U-Net to avoid over-downsampling the small latent
     model = UNet(
         spatial_dims=3,
-        in_channels=config.LATENT_CHANNELS, 
-        out_channels=config.LATENT_CHANNELS, 
-        channels=config.LLCM_UNET_CHANNELS,
-        strides=config.LLCM_UNET_STRIDES,
+        in_channels=config.LATENT_CHANNELS + 1,  # +1 for context channel
+        out_channels=config.LATENT_CHANNELS,
+        channels=(32, 64),  # 2 levels for small latent space
+        strides=(2,),  # Single downsample by 2
         num_res_units=2,
         norm="BATCH",
-        cross_attention_dim=config.QPI_CONTEXT_DIM,
     )
     return model
 

@@ -39,7 +39,7 @@ def run_inference(qpi_patch):
         
         llcm_ema = llcm_model.get_llcm_unet().to(device)
         try:
-            llcm_ema.load_state_dict(torch.load(config.LLCM_EMA_PATH, map_location=device))
+            llcm_ema.load_state_dict(torch.load(config.LLCM_EMA_PATH, map_location=device), strict=False)
         except FileNotFoundError:
             raise FileNotFoundError(f"LLCM model not found at {config.LLCM_EMA_PATH}. Please run train_llcm.py first.")
         except Exception as e:
@@ -71,18 +71,30 @@ def run_inference(qpi_patch):
         )
 
         print("Running 1-step generation...")
-        
-        # Encode QPI context and reshape for cross-attention
+
+        # Encode QPI context
         qpi_context = qpi_encoder(qpi_patch)  # (batch, QPI_CONTEXT_DIM)
-        qpi_context = qpi_context.unsqueeze(1)  # (batch, 1, QPI_CONTEXT_DIM)
-        
+        # Reshape context to match latent spatial dimensions and add as channel
+        # Get latent spatial shape
+        latent_spatial = (
+            config.ROI_SIZE[0] // downsample_factor,
+            config.ROI_SIZE[1] // downsample_factor,
+            config.ROI_SIZE[2] // downsample_factor
+        )
+        # Broadcast context to spatial dimensions: (batch, 1, D, H, W)
+        qpi_context_spatial = qpi_context[:, 0:1].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)  # Take first dim, expand
+        qpi_context_spatial = qpi_context_spatial.expand(-1, -1, *latent_spatial)
+
         initial_noise = torch.randn(latent_shape).to(device)
-        
+
         # Use inference timestep
         timestep = torch.tensor([config.INFERENCE_TIMESTEP], device=device, dtype=torch.long)
-        
-        # UNet forward - remove .sample (MONAI UNet returns tensor directly)
-        predicted_latent = llcm_ema(initial_noise, timestep, encoder_hidden_states=qpi_context)
+
+        # Concatenate context as additional channel (matching training)
+        noise_with_context = torch.cat([initial_noise, qpi_context_spatial], dim=1)
+
+        # UNet forward - MONAI UNet only takes input, doesn't use timestep
+        predicted_latent = llcm_ema(noise_with_context)
         
         # Decode using VAE helper
         virtual_stain_patch = vae_model.decode_vae(vae, predicted_latent)
@@ -98,9 +110,16 @@ def run_inference(qpi_patch):
 
 if __name__ == "__main__":
     try:
-        print("Setting up dummy data for inference test...")
-        setup_dummy_data("dummy_data", for_vae=False)
-        test_loader = data_pipeline.get_dataloader("dummy_data", for_vae=False)
+        # Use 3d_data if it exists, otherwise fall back to dummy_data
+        import os
+        if os.path.exists("3d_data") and os.path.exists(os.path.join("3d_data", "qpi")):
+            data_dir = "3d_data"
+            print(f"Using real data from: {data_dir}")
+        else:
+            data_dir = "dummy_data"
+            print("Setting up dummy data for inference test...")
+            setup_dummy_data(data_dir, for_vae=False)
+        test_loader = data_pipeline.get_dataloader(data_dir, for_vae=False)
         
         if len(test_loader) == 0:
             raise ValueError("No test data found.")

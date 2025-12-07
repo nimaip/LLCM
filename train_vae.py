@@ -15,9 +15,15 @@ def train_vae():
     
     try:
         device = config.DEVICE
-        data_dir = "dummy_data" 
-        
-        setup_dummy_data(data_dir, for_vae=True) 
+        # Use 3d_data if it exists, otherwise fall back to dummy_data
+        import os
+        if os.path.exists("3d_data") and os.path.exists(os.path.join("3d_data", "dapi")):
+            data_dir = "3d_data"
+            print(f"Using real data from: {data_dir}")
+        else:
+            data_dir = "dummy_data"
+            setup_dummy_data(data_dir, for_vae=True)
+            print(f"Using dummy data from: {data_dir}") 
         print(f"Loading DAPI data from: {data_dir}")
         train_loader = data_pipeline.get_dataloader(data_dir, for_vae=True)
         
@@ -60,8 +66,15 @@ def train_vae():
                     optimizer.zero_grad()
                     
                     with autocast():
-                        # MONAI VarAutoEncoder returns (reconstruction, mu, logvar)
-                        reconstructed_dapi, mu, logvar = model(dapi_patches)
+                        # MONAI VarAutoEncoder returns (reconstruction, mu, logvar, z)
+                        # where z is the sampled latent (we don't need it for training)
+                        result = model(dapi_patches)
+                        if len(result) == 4:
+                            reconstructed_dapi, mu, logvar, _ = result
+                        elif len(result) == 3:
+                            reconstructed_dapi, mu, logvar = result
+                        else:
+                            raise ValueError(f"Unexpected number of return values: {len(result)}")
                         
                         l1_loss = F.l1_loss(reconstructed_dapi, dapi_patches)
                         kl_loss = vae_model.compute_kl_loss(mu, logvar).mean()

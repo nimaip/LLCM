@@ -1,6 +1,8 @@
 import os
 import glob
 import torch
+import numpy as np
+import tifffile
 from monai.data import DataLoader, CacheDataset
 from monai.transforms import (
     Compose,
@@ -10,8 +12,35 @@ from monai.transforms import (
     RandSpatialCropSamplesd,
     EnsureTyped,
     ToTensord,
+    Transform,
 )
 import config
+
+
+class LoadTiffd(Transform):
+    """Custom transform to load TIFF files using tifffile."""
+    def __init__(self, keys):
+        self.keys = keys if isinstance(keys, list) else [keys]
+    
+    def __call__(self, data):
+        for key in self.keys:
+            if key in data:
+                img = tifffile.imread(data[key])
+                # Ensure 3D: if 2D, add depth dimension
+                if img.ndim == 2:
+                    img = img[np.newaxis, ...]  # Add depth dimension: (1, H, W)
+                # Pad to minimum depth if needed
+                if img.shape[0] < config.ROI_SIZE[0]:
+                    pad_depth = config.ROI_SIZE[0] - img.shape[0]
+                    # Repeat the slice to pad
+                    padding = np.repeat(img[-1:], pad_depth, axis=0)
+                    img = np.concatenate([img, padding], axis=0)
+                # Add channel dimension: (D, H, W) -> (1, D, H, W) for MONAI
+                if img.ndim == 3:
+                    img = img[np.newaxis, ...]  # (1, D, H, W)
+                data[key] = img
+        return data
+
 
 def get_train_transforms():
     """
@@ -22,8 +51,9 @@ def get_train_transforms():
     by cropping random sub-volumes of the specified ROI_SIZE.
     """
     return Compose([
-        LoadImaged(keys=["qpi", "dapi"]),
-        EnsureChannelFirstd(keys=["qpi", "dapi"]),
+        LoadTiffd(keys=["qpi", "dapi"]),  # Custom TIFF loader with padding (outputs: C, D, H, W)
+        # Channel is already first from LoadTiffd, but EnsureChannelFirstd ensures it's correct
+        EnsureChannelFirstd(keys=["qpi", "dapi"], channel_dim=0),
         ScaleIntensityRanged(
             keys=["qpi", "dapi"],
             a_min=0, a_max=65535,  # Assumes 16-bit input range (0-65535)
@@ -47,8 +77,8 @@ def get_train_transforms():
 def get_vae_transforms():
     """Defines the MONAI transformation pipeline for VAE training (DAPI only)."""
     return Compose([
-        LoadImaged(keys=["dapi"]),
-        EnsureChannelFirstd(keys=["dapi"]),
+        LoadTiffd(keys=["dapi"]),  # Custom TIFF loader with padding (outputs: C, D, H, W)
+        EnsureChannelFirstd(keys=["dapi"], channel_dim=0),
         ScaleIntensityRanged(
             keys=["dapi"],
             a_min=0, a_max=65535,
